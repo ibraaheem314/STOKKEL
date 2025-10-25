@@ -1,0 +1,78 @@
+# =========================================
+# Stokkel Dashboard - Dockerfile Production
+# =========================================
+
+# Stage 1: Build
+FROM python:3.11-slim as builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+# Installation des dépendances système
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Installation des dépendances Python
+COPY requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Stage 2: Runtime
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    STREAMLIT_SERVER_PORT=8501 \
+    STREAMLIT_SERVER_ADDRESS=0.0.0.0 \
+    STREAMLIT_SERVER_HEADLESS=true \
+    STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+
+# Création d'un utilisateur non-root
+RUN groupadd -r stokkel && useradd -r -g stokkel stokkel
+
+WORKDIR /app
+
+# Création des répertoires
+RUN mkdir -p /app/.streamlit /app/logs && \
+    chown -R stokkel:stokkel /app
+
+# Copie des dépendances
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Copie du code
+COPY --chown=stokkel:stokkel dashboard/ /app/dashboard/
+
+# Configuration Streamlit
+RUN echo '\
+[server]\n\
+port = 8501\n\
+address = "0.0.0.0"\n\
+headless = true\n\
+\n\
+[browser]\n\
+gatherUsageStats = false\n\
+\n\
+[theme]\n\
+primaryColor = "#1f77b4"\n\
+backgroundColor = "#ffffff"\n\
+secondaryBackgroundColor = "#f0f2f6"\n\
+textColor = "#262730"\n\
+font = "sans serif"\n\
+' > /app/.streamlit/config.toml && \
+    chown stokkel:stokkel /app/.streamlit/config.toml
+
+USER stokkel
+
+EXPOSE 8501
+
+LABEL maintainer="contact@stokkel.sn" \
+      version="1.0.0" \
+      description="Stokkel Dashboard - Interface utilisateur Streamlit"
+
+CMD ["streamlit", "run", "dashboard/app.py", "--server.port=8501", "--server.address=0.0.0.0"]

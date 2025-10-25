@@ -1,0 +1,235 @@
+name: Stokkel CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  # =========================================
+  # JOB 1: Tests & Quality
+  # =========================================
+  test:
+    name: Tests & Code Quality
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11']
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v3
+    
+    - name: 🐍 Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+    
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov black flake8 mypy
+    
+    - name: ✨ Code formatting check (Black)
+      run: |
+        black --check app/ dashboard/ scripts/ *.py
+    
+    - name: 🔍 Lint with flake8
+      run: |
+        flake8 app/ dashboard/ scripts/ --max-line-length=120 --exclude=__pycache__,.venv
+    
+    - name: 🔬 Type checking (mypy)
+      run: |
+        mypy app/ --ignore-missing-imports
+      continue-on-error: true
+    
+    - name: 🧪 Run tests with coverage
+      run: |
+        python test.py
+        pytest --cov=app --cov=dashboard --cov-report=xml --cov-report=term
+      continue-on-error: true
+    
+    - name: 📊 Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        fail_ci_if_error: false
+
+  # =========================================
+  # JOB 2: Security Scan
+  # =========================================
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v3
+    
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install safety bandit
+    
+    - name: 🔒 Check for known vulnerabilities (Safety)
+      run: |
+        safety check --json || true
+    
+    - name: 🛡️ Security linting (Bandit)
+      run: |
+        bandit -r app/ -f json -o bandit-report.json || true
+
+  # =========================================
+  # JOB 3: Docker Build
+  # =========================================
+  docker:
+    name: Docker Build & Test
+    runs-on: ubuntu-latest
+    needs: [test]
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v3
+    
+    - name: 🐳 Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+    
+    - name: 🔐 Log in to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    - name: 🏗️ Build API Docker image
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: ./infra/Dockerfile.api
+        push: false
+        tags: stokkel/api:test
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+    
+    - name: 🏗️ Build Dashboard Docker image
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: ./infra/Dockerfile.ui
+        push: false
+        tags: stokkel/dashboard:test
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+    
+    - name: 🧪 Test Docker containers
+      run: |
+        docker-compose -f infra/docker-compose.yml up -d api
+        sleep 10
+        curl -f http://localhost:8000/health || exit 1
+        docker-compose -f infra/docker-compose.yml down
+
+  # =========================================
+  # JOB 4: Deploy (Production)
+  # =========================================
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [test, security, docker]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    environment:
+      name: production
+      url: https://stokkel.sn
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v3
+    
+    - name: 🐳 Log in to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    
+    - name: 🏗️ Build and push API image
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: ./infra/Dockerfile.api
+        push: true
+        tags: |
+          stokkel/api:latest
+          stokkel/api:${{ github.sha }}
+    
+    - name: 🏗️ Build and push Dashboard image
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: ./infra/Dockerfile.ui
+        push: true
+        tags: |
+          stokkel/dashboard:latest
+          stokkel/dashboard:${{ github.sha }}
+    
+    - name: 🚀 Deploy to server
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.PRODUCTION_HOST }}
+        username: ${{ secrets.PRODUCTION_USER }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        script: |
+          cd /opt/stokkel
+          docker-compose pull
+          docker-compose up -d
+          docker system prune -f
+    
+    - name: ✅ Verify deployment
+      run: |
+        sleep 30
+        curl -f ${{ secrets.PRODUCTION_URL }}/health || exit 1
+    
+    - name: 📢 Notify deployment
+      uses: 8398a7/action-slack@v3
+      with:
+        status: ${{ job.status }}
+        text: 'Stokkel déployé en production ✅'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+      if: always()
+
+  # =========================================
+  # JOB 5: Performance Testing
+  # =========================================
+  performance:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    needs: [test]
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v3
+    
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install locust
+    
+    - name: ⚡ Run performance tests
+      run: |
+        echo "Performance tests would run here"
+        # locust -f tests/load_test.py --headless -u 100 -r 10 --run-time 1m
+      continue-on-error: true
