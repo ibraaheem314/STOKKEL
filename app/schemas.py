@@ -24,10 +24,25 @@ class SalesDataPoint(BaseModel):
 
 class ForecastPoint(BaseModel):
     """Point de prévision de vente"""
-    date: str = Field(..., description="Date de la prévision")
-    p10: float = Field(..., description="Quantile 10% (pessimiste)")
-    p50: float = Field(..., description="Quantile 50% (médiane)")
-    p90: float = Field(..., description="Quantile 90% (optimiste)")
+    date: Date = Field(..., description="Date de la prévision")
+    p10: float = Field(..., ge=0, description="Quantile 10% (pessimiste)")
+    p50: float = Field(..., ge=0, description="Quantile 50% (médiane)")
+    p90: float = Field(..., ge=0, description="Quantile 90% (optimiste)")
+    
+    @field_validator('date', mode='before')
+    @classmethod
+    def parse_date(cls, v):
+        """Convertir string en date si nécessaire"""
+        if isinstance(v, str):
+            return datetime.strptime(v, '%Y-%m-%d').date()
+        elif isinstance(v, datetime):
+            return v.date()
+        return v
+    
+    class Config:
+        json_encoders = {
+            Date: lambda v: v.strftime('%Y-%m-%d')
+        }
 
 
 class ForecastResponse(BaseModel):

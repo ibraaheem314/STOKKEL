@@ -48,7 +48,7 @@ def initialize_session_state():
         st.session_state.api_url = "http://localhost:8000"
     
     if 'api_token' not in st.session_state:
-        st.session_state.api_token = "stokkel_mvp_token"
+        st.session_state.api_token = "stokkel_mvp_token_2024"
     
     if 'default_lead_time' not in st.session_state:
         st.session_state.default_lead_time = 7

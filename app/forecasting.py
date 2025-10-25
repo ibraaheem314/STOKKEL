@@ -9,25 +9,50 @@ from typing import Dict, List, Tuple, Optional
 from datetime import datetime, timedelta
 import logging
 from pathlib import Path
+from threading import Lock
 
 from prophet import Prophet
 from prophet.serialize import model_to_json, model_from_json
 import warnings
 warnings.filterwarnings('ignore')
 
-from config import settings
-from schemas import ForecastPoint
+from fastapi import HTTPException, status
+
+from .config import settings
+from .schemas import ForecastPoint
+from .validators import DataValidator, ValidationError
+from .cache import cache
+
+# Exceptions personnalisées
+class ForecastError(Exception):
+    """Exception personnalisée pour les erreurs de prévision"""
+    pass
+
+class InsufficientDataError(ForecastError):
+    """Données insuffisantes"""
+    pass
 
 logger = logging.getLogger(__name__)
 
 
 class ForecastEngine:
-    """Moteur de prévision utilisant Prophet pour les prévisions probabilistes"""
+    """Moteur de prévision thread-safe utilisant Prophet pour les prévisions probabilistes"""
     
     def __init__(self):
         self.models_dir = Path(settings.models_dir)
         self.models_dir.mkdir(exist_ok=True)
+        
+        # Cache thread-safe
         self.trained_models: Dict[str, Prophet] = {}
+        self._cache_locks: Dict[str, Lock] = {}  # Lock par produit
+        self._global_lock = Lock()  # Lock pour gérer les locks eux-mêmes
+    
+    def _get_lock(self, product_id: str) -> Lock:
+        """Obtient ou crée un lock pour un produit"""
+        with self._global_lock:
+            if product_id not in self._cache_locks:
+                self._cache_locks[product_id] = Lock()
+            return self._cache_locks[product_id]
         
     def generate_forecast(
         self,
@@ -47,13 +72,28 @@ class ForecastEngine:
             Tuple (liste de ForecastPoint, metadata dict)
         """
         try:
-            logger.info(f"Génération de prévision pour {product_id} sur {horizon_days} jours")
+            logger.info(f"🔮 Génération prévision | product={product_id} horizon={horizon_days}j")
+            
+            # Validation des paramètres
+            DataValidator.validate_forecast_params(horizon_days, settings.max_forecast_horizon)
             
             # Validation des données
-            if len(historical_data) < settings.min_data_points:
-                raise ValueError(
-                    f"Données insuffisantes: {len(historical_data)} points "
-                    f"(minimum {settings.min_data_points} requis)"
+            is_valid, error_msg = DataValidator.validate_product_data(
+                historical_data, product_id, settings.min_data_points
+            )
+            if not is_valid:
+                raise InsufficientDataError(error_msg)
+            
+            # Vérifier les valeurs nulles
+            if historical_data['y'].isna().any():
+                logger.warning(f"⚠️ Valeurs manquantes détectées pour {product_id}, nettoyage...")
+                historical_data = historical_data.dropna(subset=['y'])
+            
+            # Vérifier que toutes les valeurs ne sont pas nulles
+            if historical_data['y'].sum() == 0:
+                raise ForecastError(
+                    f"Produit {product_id}: toutes les ventes sont à zéro. "
+                    f"Impossible de générer une prévision significative."
                 )
             
             # Entraînement ou chargement du modèle
@@ -82,7 +122,7 @@ class ForecastEngine:
                 # P50 = médiane (yhat)
                 # P90 ≈ valeur haute de l'intervalle
                 point = ForecastPoint(
-                    date=row['ds'].strftime('%Y-%m-%d'),
+                    date=row['ds'].date(),  # Convertir en date object
                     p10=round(yhat_lower, 2),
                     p50=round(yhat, 2),
                     p90=round(yhat_upper, 2)
@@ -98,13 +138,48 @@ class ForecastEngine:
             
             return forecast_points, metadata
             
+        except InsufficientDataError as e:
+            # Erreur utilisateur: données insuffisantes
+            logger.warning(str(e))
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error": "Données insuffisantes",
+                    "message": str(e),
+                    "product_id": product_id,
+                    "data_points": len(historical_data),
+                    "required": settings.min_data_points
+                }
+            )
+        
+        except ForecastError as e:
+            # Erreur métier
+            logger.error(str(e))
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "error": "Impossible de générer la prévision",
+                    "message": str(e),
+                    "product_id": product_id
+                }
+            )
+        
         except Exception as e:
-            logger.error(f"Erreur lors de la génération de prévision: {str(e)}")
-            raise
+            # Erreur technique inattendue
+            logger.error(f"❌ Erreur technique pour {product_id}: {str(e)}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "error": "Erreur interne du serveur",
+                    "message": "Une erreur technique est survenue. Veuillez réessayer.",
+                    "product_id": product_id,
+                    "support": "Contactez le support si le problème persiste"
+                }
+            )
     
     def _get_or_train_model(self, product_id: str, data: pd.DataFrame) -> Prophet:
         """
-        Récupère un modèle entraîné du cache ou en entraîne un nouveau
+        Récupère un modèle entraîné du cache ou en entraîne un nouveau (thread-safe)
         
         Args:
             product_id: Identifiant du produit
@@ -113,26 +188,70 @@ class ForecastEngine:
         Returns:
             Modèle Prophet entraîné
         """
-        # Vérifier le cache
+        # Vérification rapide sans lock
         if product_id in self.trained_models:
-            logger.info(f"Utilisation du modèle en cache pour {product_id}")
+            logger.info(f"✅ Modèle en cache pour {product_id}")
             return self.trained_models[product_id]
         
-        # Vérifier si un modèle sauvegardé existe
-        model_path = self.models_dir / f"{product_id}_model.json"
-        if model_path.exists():
-            try:
-                with open(model_path, 'r') as f:
-                    model = model_from_json(f.read())
-                self.trained_models[product_id] = model
-                logger.info(f"Modèle chargé depuis {model_path}")
-                return model
-            except Exception as e:
-                logger.warning(f"Impossible de charger le modèle sauvegardé: {str(e)}")
+        # Vérifier le cache Redis
+        cache_key = f"model:{product_id}"
+        cached_model = cache.get(cache_key)
+        if cached_model:
+            logger.info(f"🔴 Modèle depuis Redis pour {product_id}")
+            self.trained_models[product_id] = cached_model
+            return cached_model
         
-        # Entraîner un nouveau modèle
-        model = self._train_new_model(product_id, data)
-        return model
+        # Obtenir le lock spécifique au produit
+        product_lock = self._get_lock(product_id)
+        
+        with product_lock:
+            # Double-check après avoir acquis le lock
+            if product_id in self.trained_models:
+                logger.info(f"✅ Modèle en cache (double-check) pour {product_id}")
+                return self.trained_models[product_id]
+            
+            # Vérifier si un modèle sauvegardé existe
+            model_path = self.models_dir / f"{product_id}_model.json"
+            if model_path.exists():
+                try:
+                    with open(model_path, 'r') as f:
+                        model = model_from_json(f.read())
+                    self.trained_models[product_id] = model
+                    logger.info(f"📂 Modèle chargé depuis {model_path}")
+                    return model
+                except Exception as e:
+                    logger.warning(f"⚠️ Impossible de charger {model_path}: {e}")
+            
+            # Entraîner un nouveau modèle
+            logger.info(f"🔄 Entraînement d'un nouveau modèle pour {product_id}")
+            model = self._train_new_model(product_id, data)
+            
+            # Sauvegarder dans le cache local
+            self.trained_models[product_id] = model
+            
+            # Sauvegarder dans le cache Redis (TTL 1 heure)
+            cache.set(cache_key, model, ttl=settings.cache_ttl_seconds)
+            logger.info(f"🔴 Modèle sauvegardé dans Redis pour {product_id}")
+            
+            return model
+    
+    def clear_cache(self, product_id: Optional[str] = None):
+        """Nettoie le cache de manière thread-safe"""
+        if product_id:
+            product_lock = self._get_lock(product_id)
+            with product_lock:
+                if product_id in self.trained_models:
+                    del self.trained_models[product_id]
+                # Nettoyer aussi le cache Redis
+                cache_key = f"model:{product_id}"
+                cache.delete(cache_key)
+                logger.info(f"🗑️ Cache nettoyé pour {product_id}")
+        else:
+            with self._global_lock:
+                self.trained_models.clear()
+                # Nettoyer tout le cache Redis
+                cache.clear()
+                logger.info("🗑️ Cache complet nettoyé")
     
     def _train_new_model(self, product_id: str, data: pd.DataFrame) -> Prophet:
         """

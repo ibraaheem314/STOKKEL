@@ -10,8 +10,8 @@ from datetime import datetime, timedelta
 import logging
 from scipy import stats
 
-from config import settings
-from schemas import RecommendationResponse
+from .config import settings
+from .schemas import RecommendationResponse
 
 logger = logging.getLogger(__name__)
 

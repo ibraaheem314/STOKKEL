@@ -11,7 +11,8 @@ import logging
 from pathlib import Path
 import json
 
-from config import settings
+from .config import settings
+from .validators import DataValidator, ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,11 @@ class DataManager:
             
             if missing_cols:
                 raise ValueError(f"Colonnes manquantes: {missing_cols}")
+            
+            # Validation centralisée
+            is_valid, error_msg = DataValidator.validate_sales_dataframe(df)
+            if not is_valid:
+                raise ValidationError(error_msg)
             
             # Conversion et nettoyage
             df['date'] = pd.to_datetime(df['date'])

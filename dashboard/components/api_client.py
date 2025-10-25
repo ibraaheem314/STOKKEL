@@ -63,6 +63,7 @@ class APIClient:
             'Authorization': f'Bearer {self.token}'
         }
 
+
         response = requests.post(
             f"{self.base_url}/upload_sales",
             files=files,

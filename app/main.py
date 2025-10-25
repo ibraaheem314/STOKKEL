@@ -12,9 +12,10 @@ import logging
 from datetime import datetime
 import tempfile
 import os
+from functools import wraps
 
-from config import settings
-from schemas import (
+from .config import settings
+from .schemas import (
     ForecastResponse,
     RecommendationResponse,
     BatchRecommendationRequest,
@@ -24,9 +25,9 @@ from schemas import (
     ProductInfo,
     ErrorResponse
 )
-from data_manager import data_manager
-from forecasting import forecast_engine
-from optimization import stock_optimizer
+from .data_manager import data_manager
+from .forecasting import forecast_engine
+from .optimization import stock_optimizer
 
 # Configuration du logging
 logging.basicConfig(
@@ -57,6 +58,11 @@ app.add_middleware(
 # Dépendance pour l'authentification simple
 async def verify_token(authorization: Optional[str] = Header(None)):
     """Vérifie le token d'authentification"""
+    
+    # Si auth désactivée, laisser passer
+    if not settings.auth_enabled:
+        return "dev_mode"
+    
     if authorization is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -82,6 +88,45 @@ async def verify_token(authorization: Optional[str] = Header(None)):
         )
     
     return token
+
+
+def handle_errors(func):
+    """Decorator pour gérer les erreurs proprement"""
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        
+        except HTTPException:
+            # Déjà une HTTPException, la relancer telle quelle
+            raise
+        
+        except ValueError as e:
+            # Erreur de validation
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"error": "Paramètre invalide", "message": str(e)}
+            )
+        
+        except FileNotFoundError as e:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"error": "Ressource introuvable", "message": str(e)}
+            )
+        
+        except Exception as e:
+            # Erreur inattendue
+            logger.error(f"❌ Erreur inattendue: {str(e)}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "error": "Erreur interne",
+                    "message": "Une erreur technique est survenue",
+                    "support": "Contactez le support si le problème persiste"
+                }
+            )
+    
+    return wrapper
 
 
 # Gestionnaire d'erreurs global
@@ -216,6 +261,7 @@ async def get_products(token: str = Depends(verify_token)):
 
 
 @app.get("/forecast/{product_id}", response_model=ForecastResponse, tags=["Forecasting"])
+@handle_errors
 async def get_forecast(
     product_id: str,
     horizon_days: int = 30,
@@ -286,6 +332,7 @@ async def get_forecast(
 
 
 @app.get("/recommendation/{product_id}", response_model=RecommendationResponse, tags=["Optimization"])
+@handle_errors
 async def get_recommendation(
     product_id: str,
     current_stock: float = 0,

@@ -301,7 +301,7 @@ def render_api_settings(api_client):
     with col2:
         api_token = st.text_input(
             "Token d'authentification",
-            value=st.session_state.get('api_token', 'stokkel_mvp_token'),
+            value=st.session_state.get('api_token', 'stokkel_mvp_token_2024'),
             type="password",
             help="Clé API pour l'authentification"
         )
