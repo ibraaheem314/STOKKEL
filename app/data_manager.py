@@ -25,6 +25,25 @@ class DataManager:
         self.data_dir.mkdir(exist_ok=True)
         self.sales_data: Optional[pd.DataFrame] = None
         self.products_cache: Dict = {}
+    
+    def _detect_column_mapping(self, df: pd.DataFrame) -> dict:
+        """Détecte automatiquement le mapping des colonnes"""
+        mapping = {}
+        
+        # Mapping des colonnes communes
+        column_mappings = {
+            'product_id': ['reference_article', 'product_id', 'id', 'ref', 'reference'],
+            'date': ['date_vente', 'date', 'date_vente', 'timestamp', 'created_at'],
+            'quantity': ['quantite_vendue', 'quantity', 'qty', 'amount', 'volume']
+        }
+        
+        for target_col, possible_cols in column_mappings.items():
+            for col in df.columns:
+                if col.lower() in [c.lower() for c in possible_cols]:
+                    mapping[col] = target_col
+                    break
+        
+        return mapping
         
     def load_sales_data(self, filepath: str) -> Dict:
         """
@@ -39,6 +58,14 @@ class DataManager:
         try:
             # Lecture du CSV
             df = pd.read_csv(filepath)
+            
+            # Détection automatique du mapping des colonnes
+            column_mapping = self._detect_column_mapping(df)
+            
+            # Application du mapping si détecté
+            if column_mapping:
+                logger.info(f"🔄 Mapping automatique détecté: {column_mapping}")
+                df = df.rename(columns=column_mapping)
             
             # Validation des colonnes requises
             required_cols = ['product_id', 'date', 'quantity']

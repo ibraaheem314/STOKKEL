@@ -63,12 +63,21 @@ class DataValidator:
         if len(data) < min_points:
             return False, f"Données insuffisantes: {len(data)} points (minimum {min_points})"
         
-        if data['quantity'].sum() == 0:
+        # Support des formats Prophet (y, ds) et standard (quantity, date)
+        quantity_col = 'y' if 'y' in data.columns else 'quantity'
+        date_col = 'ds' if 'ds' in data.columns else 'date'
+        
+        if quantity_col not in data.columns:
+            return False, f"Colonne de quantité manquante: {quantity_col}"
+        if date_col not in data.columns:
+            return False, f"Colonne de date manquante: {date_col}"
+        
+        if data[quantity_col].sum() == 0:
             return False, "Toutes les ventes sont à zéro"
         
         # Vérifier la continuité temporelle
-        data_sorted = data.sort_values('date')
-        date_range = (data_sorted['date'].max() - data_sorted['date'].min()).days
+        data_sorted = data.sort_values(date_col)
+        date_range = (data_sorted[date_col].max() - data_sorted[date_col].min()).days
         
         if date_range < min_points:
             return False, f"Période trop courte: {date_range} jours (minimum {min_points})"
