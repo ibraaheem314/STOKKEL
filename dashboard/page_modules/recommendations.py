@@ -109,10 +109,10 @@ def render_single_product_tab(api_client):
         )
         
         if recommendation:
-            render_single_recommendation(recommendation, selected_product)
+            render_single_recommendation(recommendation, selected_product, current_stock)
 
 
-def render_single_recommendation(recommendation, product_id):
+def render_single_recommendation(recommendation, product_id, current_stock):
     """Affiche une recommandation unique"""
     
     st.markdown("---")
@@ -229,7 +229,7 @@ def render_single_recommendation(recommendation, product_id):
             st.markdown("#### ⚙️ Paramètres")
             st.write(f"**Délai de livraison :** {metadata['lead_time']} jours")
             st.write(f"**Niveau de service :** {metadata['service_level']}%")
-            st.write(f"**Stock actuel :** {metadata['current_stock']} unités")
+            st.write(f"**Stock actuel :** {current_stock} unités")
     
     # Simulation de scénarios
     with st.expander("🎲 Simulation de Scénarios"):
@@ -260,7 +260,7 @@ def render_single_recommendation(recommendation, product_id):
             selected_product = st.session_state.get('rec_product', st.session_state.products[0] if st.session_state.products else None)
             new_rec = generate_recommendation(
                 api_client, selected_product, 
-                metadata['current_stock'], new_lead_time, new_service
+                current_stock, new_lead_time, new_service
             )
             
             if new_rec:
