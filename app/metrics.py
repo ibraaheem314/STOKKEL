@@ -36,7 +36,7 @@ class MetricsCollector:
     """Collecteur et analyseur de métriques"""
     
     def __init__(self, metrics_dir: Optional[Path] = None):
-        from config import settings
+        from .config import settings
         self.metrics_dir = Path(metrics_dir or settings.metrics_dir)
         self.metrics_dir.mkdir(exist_ok=True)
         logger.info(f"📊 MetricsCollector initialisé: {self.metrics_dir}")
