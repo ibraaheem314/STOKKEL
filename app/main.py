@@ -27,6 +27,7 @@ from .schemas import (
 from .data_manager import data_manager
 from .forecasting import forecast_engine
 from .optimization import stock_optimizer
+from .auth import auth_router, get_current_active_user, require_admin
 
 # Configuration du logging
 logging.basicConfig(
@@ -52,6 +53,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Inclusion du router d'authentification
+app.include_router(auth_router)
 
 
 # Dépendance pour l'authentification simple
@@ -150,7 +154,7 @@ async def health_check():
 @app.post("/upload_sales", response_model=UploadResponse, tags=["Data"])
 async def upload_sales_data(
     file: UploadFile = File(...),
-    token: str = Depends(verify_token)
+    current_user = Depends(get_current_active_user)
 ):
     """
     Upload des données historiques de ventes
@@ -225,7 +229,7 @@ async def get_products(token: str = Depends(verify_token)):
 async def get_forecast(
     product_id: str,
     horizon_days: int = 30,
-    token: str = Depends(verify_token)
+    current_user = Depends(get_current_active_user)
 ):
     """
     Génère une prévision probabiliste pour un produit
@@ -297,7 +301,7 @@ async def get_recommendation(
     current_stock: float = 0,
     lead_time_days: int = settings.default_lead_time,
     service_level_percent: int = settings.default_service_level,
-    token: str = Depends(verify_token)
+    current_user = Depends(get_current_active_user)
 ):
     """
     Génère une recommandation d'approvisionnement pour un produit
@@ -375,7 +379,7 @@ async def get_recommendation(
 @app.post("/batch_recommendations", response_model=BatchRecommendationResponse, tags=["Optimization"])
 async def get_batch_recommendations(
     request: BatchRecommendationRequest,
-    token: str = Depends(verify_token)
+    current_user = Depends(get_current_active_user)
 ):
     """
     Génère des recommandations pour tous les produits
@@ -446,7 +450,7 @@ async def get_batch_recommendations(
 @app.delete("/cache/{product_id}", tags=["Admin"])
 async def clear_model_cache(
     product_id: Optional[str] = None,
-    token: str = Depends(verify_token)
+    current_user = Depends(get_current_active_user)
 ):
     """
     Nettoie le cache des modèles (utile pour forcer le réentraînement)
