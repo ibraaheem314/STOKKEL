@@ -64,7 +64,7 @@ class DataManager:
             
             # Application du mapping si détecté
             if column_mapping:
-                logger.info(f"🔄 Mapping automatique détecté: {column_mapping}")
+                logger.info(f"Mapping automatique detecte: {column_mapping}")
                 df = df.rename(columns=column_mapping)
             
             # Validation des colonnes requises

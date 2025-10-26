@@ -72,7 +72,7 @@ class ForecastEngine:
             Tuple (liste de ForecastPoint, metadata dict)
         """
         try:
-            logger.info(f"🔮 Génération prévision | product={product_id} horizon={horizon_days}j")
+            logger.info(f"Generation prevision | product={product_id} horizon={horizon_days}j")
             
             # Validation des paramètres
             DataValidator.validate_forecast_params(horizon_days, settings.max_forecast_horizon)

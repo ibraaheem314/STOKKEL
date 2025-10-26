@@ -26,6 +26,10 @@ class DataValidator:
         """
         required_columns = ['product_id', 'date', 'quantity']
         
+        # Vérifier que le DataFrame n'est pas vide
+        if len(df) == 0:
+            return False, "Le fichier ne contient aucune donnée (vide)"
+        
         # Vérifier les colonnes
         missing = set(required_columns) - set(df.columns)
         if missing:
@@ -44,10 +48,6 @@ class DataValidator:
             pd.to_datetime(df['date'])
         except Exception:
             return False, "Format de date invalide dans la colonne 'date'"
-        
-        # Vérifier que le DataFrame n'est pas vide
-        if len(df) == 0:
-            return False, "Le fichier ne contient aucune donnée"
         
         return True, None
     

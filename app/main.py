@@ -27,26 +27,13 @@ from .schemas import (
 from .data_manager import data_manager
 from .forecasting import forecast_engine
 from .optimization import stock_optimizer
-from .auth import auth_router, get_current_active_user, require_admin
-from .exceptions import (
-    InsufficientDataError, 
-    InvalidProductError, 
-    DataValidationError,
-    ForecastError,
-    OptimizationError,
-    handle_stokkel_exception
+
+# Configuration du logging
+logging.basicConfig(
+    level=getattr(logging, settings.log_level),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-from fastapi.responses import JSONResponse
-from .validators import DataValidator
-from .logging_config import setup_logging, get_logger, log_api_request, log_forecast_request, log_forecast_result
-from .monitoring import metrics_collector, start_metrics_server
-
-# Configuration du logging structuré
-setup_logging()
-logger = get_logger("stokkel.main")
-
-# Démarrage du serveur de métriques
-start_metrics_server(port=9090)
+logger = logging.getLogger(__name__)
 
 # Création de l'application FastAPI
 app = FastAPI(
@@ -66,60 +53,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Inclusion du router d'authentification
-app.include_router(auth_router)
-
-# Gestionnaires d'exceptions globales
-@app.exception_handler(InsufficientDataError)
-async def insufficient_data_handler(request, exc):
-    http_exc = handle_stokkel_exception(exc)
-    return JSONResponse(
-        status_code=http_exc.status_code,
-        content=http_exc.detail
-    )
-
-@app.exception_handler(InvalidProductError)
-async def invalid_product_handler(request, exc):
-    http_exc = handle_stokkel_exception(exc)
-    return JSONResponse(
-        status_code=http_exc.status_code,
-        content=http_exc.detail
-    )
-
-@app.exception_handler(DataValidationError)
-async def data_validation_handler(request, exc):
-    http_exc = handle_stokkel_exception(exc)
-    return JSONResponse(
-        status_code=http_exc.status_code,
-        content=http_exc.detail
-    )
-
-@app.exception_handler(ForecastError)
-async def forecast_error_handler(request, exc):
-    http_exc = handle_stokkel_exception(exc)
-    return JSONResponse(
-        status_code=http_exc.status_code,
-        content=http_exc.detail
-    )
-
-@app.exception_handler(OptimizationError)
-async def optimization_error_handler(request, exc):
-    http_exc = handle_stokkel_exception(exc)
-    return JSONResponse(
-        status_code=http_exc.status_code,
-        content=http_exc.detail
-    )
-
 
 # Dépendance pour l'authentification simple
 async def verify_token(authorization: Optional[str] = Header(None)):
     """Vérifie le token d'authentification"""
-    
-    # Si auth désactivée, laisser passer
-    if not settings.auth_enabled:
-        logger.info("⚠️ Auth désactivée (mode dev)")
-        return "dev_mode"
-    
     if authorization is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -207,7 +144,7 @@ async def health_check():
 @app.post("/upload_sales", response_model=UploadResponse, tags=["Data"])
 async def upload_sales_data(
     file: UploadFile = File(...),
-    current_user = Depends(get_current_active_user)
+    token: str = Depends(verify_token)
 ):
     """
     Upload des données historiques de ventes
@@ -282,30 +219,19 @@ async def get_products(token: str = Depends(verify_token)):
 async def get_forecast(
     product_id: str,
     horizon_days: int = 30,
-    current_user = Depends(get_current_active_user)
+    token: str = Depends(verify_token)
 ):
     """
     Génère une prévision probabiliste pour un produit
     
     Args:
         product_id: Identifiant du produit
-        horizon_days: Nombre de jours à prévoir (1-365)
-        current_user: Utilisateur authentifié
+        horizon_days: Nombre de jours à prévoir (défaut: 30)
         
     Returns:
-        ForecastResponse: Prévisions avec intervalles de confiance
+        Prévisions avec quantiles P10, P50, P90 pour chaque jour
     """
-    # Validation des paramètres
-    is_valid, error_msg = DataValidator.validate_forecast_request(product_id, horizon_days)
-    if not is_valid:
-        raise DataValidationError(error_msg)
-    
-    # Vérifier que le produit existe
-    products = data_manager.get_products()
-    if product_id not in products:
-        raise InvalidProductError(product_id, products)
     logger.info(f"Demande de prévision pour {product_id} sur {horizon_days} jours")
-    log_forecast_request(product_id, horizon_days, current_user.username)
     
     # Validation des données
     if not data_manager.has_data():
@@ -365,7 +291,7 @@ async def get_recommendation(
     current_stock: float = 0,
     lead_time_days: int = settings.default_lead_time,
     service_level_percent: int = settings.default_service_level,
-    current_user = Depends(get_current_active_user)
+    token: str = Depends(verify_token)
 ):
     """
     Génère une recommandation d'approvisionnement pour un produit
@@ -443,7 +369,7 @@ async def get_recommendation(
 @app.post("/batch_recommendations", response_model=BatchRecommendationResponse, tags=["Optimization"])
 async def get_batch_recommendations(
     request: BatchRecommendationRequest,
-    current_user = Depends(get_current_active_user)
+    token: str = Depends(verify_token)
 ):
     """
     Génère des recommandations pour tous les produits
@@ -514,7 +440,7 @@ async def get_batch_recommendations(
 @app.delete("/cache/{product_id}", tags=["Admin"])
 async def clear_model_cache(
     product_id: Optional[str] = None,
-    current_user = Depends(get_current_active_user)
+    token: str = Depends(verify_token)
 ):
     """
     Nettoie le cache des modèles (utile pour forcer le réentraînement)

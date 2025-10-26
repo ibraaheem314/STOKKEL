@@ -43,7 +43,7 @@ class JSONFormatter(logging.Formatter):
             log_entry['error_code'] = record.error_code
         
         # Ajouter l'exception si présente
-        if record.exc_info:
+        if record.exc_info and record.exc_info != (None, None, None):
             log_entry['exception'] = {
                 'type': record.exc_info[0].__name__,
                 'message': str(record.exc_info[1]),
