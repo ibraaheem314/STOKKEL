@@ -160,3 +160,55 @@ def with_loading(message: str = "Chargement..."):
                 return result
         return wrapper
     return decorator
+
+
+# Méthodes supplémentaires pour l'API client
+@handle_api_errors
+def get_product_data(api_client, product_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Récupère les données brutes d'un produit pour graphiques personnalisés
+    NOUVEAU - Pour graphiques personnalisables
+    """
+    try:
+        response = api_client.session.get(
+            f"{api_client.base_url}/api/v1/product_data/{product_id}",
+            timeout=api_client.timeout
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        st.error(f"Erreur récupération données: {str(e)}")
+        return None
+
+@handle_api_errors
+def upload_sales(api_client, file_path: str) -> Optional[Dict[str, Any]]:
+    """
+    Upload un fichier de données de ventes
+    """
+    with open(file_path, 'rb') as f:
+        files = {'file': f}
+        response = api_client.session.post(
+            f"{api_client.base_url}/upload",
+            files=files,
+            timeout=api_client.timeout
+        )
+    response.raise_for_status()
+    return response.json()
+
+@handle_api_errors
+def confirm_mapping(api_client, mapping: Dict[str, str]) -> Optional[Dict[str, Any]]:
+    """
+    Confirme le mapping choisi par l'utilisateur
+    NOUVEAU - Mapping utilisateur personnalisé
+    """
+    try:
+        response = api_client.session.post(
+            f"{api_client.base_url}/api/v1/confirm_mapping",
+            json=mapping,
+            timeout=api_client.timeout
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        st.error(f"Erreur confirmation mapping: {str(e)}")
+        return None

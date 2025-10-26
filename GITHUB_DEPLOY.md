@@ -69,3 +69,4 @@ Le repository sera prêt pour :
 ---
 
 **🎉 Félicitations ! Stokkel sera bientôt sur GitHub !**
+
