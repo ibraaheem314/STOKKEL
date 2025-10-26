@@ -38,13 +38,15 @@ from .exceptions import (
 )
 from fastapi.responses import JSONResponse
 from .validators import DataValidator
+from .logging_config import setup_logging, get_logger, log_api_request, log_forecast_request, log_forecast_result
+from .monitoring import metrics_collector, start_metrics_server
 
-# Configuration du logging
-logging.basicConfig(
-    level=getattr(logging, settings.log_level),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Configuration du logging structuré
+setup_logging()
+logger = get_logger("stokkel.main")
+
+# Démarrage du serveur de métriques
+start_metrics_server(port=9090)
 
 # Création de l'application FastAPI
 app = FastAPI(
@@ -303,6 +305,7 @@ async def get_forecast(
     if product_id not in products:
         raise InvalidProductError(product_id, products)
     logger.info(f"Demande de prévision pour {product_id} sur {horizon_days} jours")
+    log_forecast_request(product_id, horizon_days, current_user.username)
     
     # Validation des données
     if not data_manager.has_data():
