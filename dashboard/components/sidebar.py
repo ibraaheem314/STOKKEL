@@ -4,7 +4,7 @@ Sidebar avec navigation et informations système
 
 import streamlit as st
 from datetime import datetime
-from components.session import get_stats
+from .session import get_stats
 
 
 def render_sidebar() -> str:
