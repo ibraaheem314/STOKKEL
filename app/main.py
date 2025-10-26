@@ -28,6 +28,16 @@ from .data_manager import data_manager
 from .forecasting import forecast_engine
 from .optimization import stock_optimizer
 from .auth import auth_router, get_current_active_user, require_admin
+from .exceptions import (
+    InsufficientDataError, 
+    InvalidProductError, 
+    DataValidationError,
+    ForecastError,
+    OptimizationError,
+    handle_stokkel_exception
+)
+from fastapi.responses import JSONResponse
+from .validators import DataValidator
 
 # Configuration du logging
 logging.basicConfig(
@@ -56,6 +66,47 @@ app.add_middleware(
 
 # Inclusion du router d'authentification
 app.include_router(auth_router)
+
+# Gestionnaires d'exceptions globales
+@app.exception_handler(InsufficientDataError)
+async def insufficient_data_handler(request, exc):
+    http_exc = handle_stokkel_exception(exc)
+    return JSONResponse(
+        status_code=http_exc.status_code,
+        content=http_exc.detail
+    )
+
+@app.exception_handler(InvalidProductError)
+async def invalid_product_handler(request, exc):
+    http_exc = handle_stokkel_exception(exc)
+    return JSONResponse(
+        status_code=http_exc.status_code,
+        content=http_exc.detail
+    )
+
+@app.exception_handler(DataValidationError)
+async def data_validation_handler(request, exc):
+    http_exc = handle_stokkel_exception(exc)
+    return JSONResponse(
+        status_code=http_exc.status_code,
+        content=http_exc.detail
+    )
+
+@app.exception_handler(ForecastError)
+async def forecast_error_handler(request, exc):
+    http_exc = handle_stokkel_exception(exc)
+    return JSONResponse(
+        status_code=http_exc.status_code,
+        content=http_exc.detail
+    )
+
+@app.exception_handler(OptimizationError)
+async def optimization_error_handler(request, exc):
+    http_exc = handle_stokkel_exception(exc)
+    return JSONResponse(
+        status_code=http_exc.status_code,
+        content=http_exc.detail
+    )
 
 
 # Dépendance pour l'authentification simple
@@ -236,11 +287,21 @@ async def get_forecast(
     
     Args:
         product_id: Identifiant du produit
-        horizon_days: Nombre de jours à prévoir (défaut: 30)
+        horizon_days: Nombre de jours à prévoir (1-365)
+        current_user: Utilisateur authentifié
         
     Returns:
-        Prévisions avec quantiles P10, P50, P90 pour chaque jour
+        ForecastResponse: Prévisions avec intervalles de confiance
     """
+    # Validation des paramètres
+    is_valid, error_msg = DataValidator.validate_forecast_request(product_id, horizon_days)
+    if not is_valid:
+        raise DataValidationError(error_msg)
+    
+    # Vérifier que le produit existe
+    products = data_manager.get_products()
+    if product_id not in products:
+        raise InvalidProductError(product_id, products)
     logger.info(f"Demande de prévision pour {product_id} sur {horizon_days} jours")
     
     # Validation des données

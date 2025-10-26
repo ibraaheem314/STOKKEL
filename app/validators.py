@@ -108,3 +108,88 @@ class DataValidator:
         
         if not (80 <= service_level_percent <= 99):
             raise ValidationError("Le niveau de service doit être entre 80 et 99%")
+    
+    @staticmethod
+    def validate_forecast_request(product_id: str, horizon_days: int) -> Tuple[bool, Optional[str]]:
+        """
+        Valide une requête de prévision
+        
+        Args:
+            product_id: Identifiant du produit
+            horizon_days: Nombre de jours à prévoir
+            
+        Returns:
+            Tuple[bool, Optional[str]]: (is_valid, error_message)
+        """
+        # Validation product_id
+        if not product_id or not isinstance(product_id, str):
+            return False, "product_id doit être une chaîne non vide"
+        
+        if len(product_id) > 50:
+            return False, "product_id trop long (max 50 caractères)"
+        
+        # Validation horizon_days
+        if not isinstance(horizon_days, int):
+            return False, "horizon_days doit être un entier"
+        
+        if horizon_days < 1:
+            return False, "horizon_days doit être >= 1"
+        
+        if horizon_days > 365:
+            return False, "horizon_days doit être <= 365"
+        
+        # Warning pour horizons longs
+        if horizon_days > 90:
+            import warnings
+            warnings.warn("Prévisions au-delà de 90 jours peuvent être moins précises")
+        
+        return True, None
+    
+    @staticmethod
+    def validate_recommendation_request(
+        product_id: str, 
+        current_stock: float, 
+        lead_time_days: int, 
+        service_level_percent: float
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Valide une requête de recommandation
+        
+        Args:
+            product_id: Identifiant du produit
+            current_stock: Stock actuel
+            lead_time_days: Délai de livraison
+            service_level_percent: Niveau de service
+            
+        Returns:
+            Tuple[bool, Optional[str]]: (is_valid, error_message)
+        """
+        # Validation product_id
+        if not product_id or not isinstance(product_id, str):
+            return False, "product_id doit être une chaîne non vide"
+        
+        # Validation current_stock
+        if not isinstance(current_stock, (int, float)):
+            return False, "current_stock doit être numérique"
+        
+        if current_stock < 0:
+            return False, "current_stock ne peut pas être négatif"
+        
+        # Validation lead_time_days
+        if not isinstance(lead_time_days, int):
+            return False, "lead_time_days doit être un entier"
+        
+        if lead_time_days < 0:
+            return False, "lead_time_days ne peut pas être négatif"
+        
+        if lead_time_days > 365:
+            return False, "lead_time_days doit être <= 365"
+        
+        # Validation service_level_percent
+        if not isinstance(service_level_percent, (int, float)):
+            return False, "service_level_percent doit être numérique"
+        
+        if service_level_percent < 0 or service_level_percent > 100:
+            return False, "service_level_percent doit être entre 0 et 100"
+        
+        return True, None
